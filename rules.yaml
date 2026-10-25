@@ -1,637 +1,883 @@
 rules:
-  - id: python-sqli-dynamic-query
-    languages: [python]
+  - id: cpp-taint-untrusted-input-to-memory-copy
+    mode: taint
+    languages: [c, cpp]
     severity: ERROR
-    message: "Dynamic SQL query construction may allow SQL injection. Use parameterized queries."
+    message: "Untrusted input reaches a memory or string copy sink. Validate bounds, canonicalize lengths, and use bounded copy APIs."
     metadata:
-      category: injection
-      checklist: "1. Injection"
-    patterns:
-      - pattern-either:
-          - pattern: '$CURSOR.execute(f"...")'
-          - pattern: '$CURSOR.execute("..." % $X)'
-          - pattern: '$CURSOR.execute("...".format(...))'
-          - pattern: '$CURSOR.execute("..." + $X)'
-          - pattern: '$CURSOR.execute($QUERY % $X)'
-          - pattern: '$CURSOR.execute($QUERY.format(...))'
-          - pattern: '$CURSOR.execute($QUERY + $X)'
-          - pattern: '$DB.raw(...)'
-          - pattern: '$QS.extra(...)'
-          - pattern: 'text(f"...")'
-          - pattern: 'text("..." % $X)'
-          - pattern: 'text("...".format(...))'
-          - pattern: 'text("..." + $X)'
-          - pattern: 'RawSQL(...)'
-      - pattern-not: '$CURSOR.execute("...")'
+      category: memory
+      checklist: "11. Memory Safety"
+      cwe:
+        - "CWE-120: Buffer Copy without Checking Size of Input"
+        - "CWE-787: Out-of-bounds Write"
+        - "CWE-125: Out-of-bounds Read"
+      confidence: HIGH
+    options:
+      symbolic_propagation: true
+    pattern-sources: &untrusted_input_sources
+      - pattern: getenv(...)
+      - pattern: std::getenv(...)
+      - pattern: argv[$I]
 
-  - id: python-nosqli-mongo-operators
-    languages: [python]
-    severity: WARNING
-    message: "MongoDB operator usage with dynamic input can lead to NoSQL injection."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    pattern-either:
-      - pattern: '$COLL.find({..., "$ne": ...})'
-      - pattern: '$COLL.find({..., "$gt": ...})'
-      - pattern: '$COLL.find({..., "$lt": ...})'
-      - pattern: '$COLL.find({..., "$regex": ...})'
-      - pattern: '$COLL.find({..., "$where": ...})'
-      - pattern: '$COLL.find_one({..., "$ne": ...})'
-      - pattern: '$COLL.find_one({..., "$gt": ...})'
-      - pattern: '$COLL.find_one({..., "$lt": ...})'
-      - pattern: '$COLL.find_one({..., "$regex": ...})'
-      - pattern: '$COLL.find_one({..., "$where": ...})'
-      - pattern: '$COLL.update_one({..., "$ne": ...}, ...)'
-      - pattern: '$COLL.update_many({..., "$ne": ...}, ...)'
-      - pattern: '$COLL.delete_one({..., "$ne": ...})'
-      - pattern: '$COLL.delete_many({..., "$ne": ...})'
+      - patterns:
+          - pattern: recv($SOCK, $BUF, $LEN, $FLAGS)
+          - focus-metavariable: $BUF
+      - pattern: recv($SOCK, $BUF, $LEN, $FLAGS)
 
-  - id: python-command-injection
-    languages: [python]
-    severity: ERROR
-    message: "Shell or process execution may allow OS command injection."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    patterns:
-      - pattern-either:
-          - pattern: os.system(...)
-          - pattern: os.popen(...)
-          - pattern: subprocess.call(..., shell=True, ...)
-          - pattern: subprocess.run(..., shell=True, ...)
-          - pattern: subprocess.Popen(..., shell=True, ...)
-          - pattern: subprocess.check_call(..., shell=True, ...)
-          - pattern: subprocess.check_output(..., shell=True, ...)
-      - pattern-not: 'os.system("...")'
-      - pattern-not: 'os.popen("...")'
+      - patterns:
+          - pattern: recvfrom($SOCK, $BUF, $LEN, $FLAGS, $ADDR, $ADDRLEN)
+          - focus-metavariable: $BUF
+      - pattern: recvfrom($SOCK, $BUF, $LEN, $FLAGS, $ADDR, $ADDRLEN)
 
-  - id: python-code-eval
-    languages: [python]
-    severity: ERROR
-    message: "Dynamic code execution can lead to remote code execution."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    pattern-either:
-      - pattern: eval(...)
-      - pattern: exec(...)
-      - pattern: compile(...)
-      - pattern: __import__(...)
+      - patterns:
+          - pattern: recvmsg($SOCK, $MSG, $FLAGS)
+          - focus-metavariable: $MSG
+      - pattern: recvmsg($SOCK, $MSG, $FLAGS)
 
-  - id: python-ssti
-    languages: [python]
-    severity: ERROR
-    message: "Server-side template rendering with dynamic input can lead to SSTI."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    patterns:
-      - pattern-either:
-          - pattern: render_template_string(...)
-          - pattern: jinja2.Template(...)
-          - pattern: jinja2.Environment(...).from_string(...)
-          - pattern: Template(...)
-      - pattern-not: 'render_template_string("...")'
-      - pattern-not: 'Template("...")'
+      - patterns:
+          - pattern: read($FD, $BUF, $LEN)
+          - focus-metavariable: $BUF
+      - pattern: read($FD, $BUF, $LEN)
 
-  - id: python-open-redirect
-    languages: [python]
-    severity: WARNING
-    message: "Redirect target comes from request input; validate against an allowlist."
-    metadata:
-      category: web
-      checklist: "2. Client-Side & Web Flaws"
-    pattern-either:
-      - pattern: redirect(request.args.get(...))
-      - pattern: redirect(request.args[...])
-      - pattern: redirect(request.form.get(...))
-      - pattern: redirect(request.form[...])
-      - pattern: redirect(request.values.get(...))
-      - pattern: redirect(request.values[...])
+      - patterns:
+          - pattern: pread($FD, $BUF, $LEN, $OFFSET)
+          - focus-metavariable: $BUF
+      - pattern: pread($FD, $BUF, $LEN, $OFFSET)
 
-  - id: python-csrf-exempt
-    languages: [python]
-    severity: WARNING
-    message: "CSRF exemption may weaken CSRF protection."
-    metadata:
-      category: web
-      checklist: "2. Client-Side & Web Flaws"
-    pattern: csrf_exempt(...)
+      - patterns:
+          - pattern: readv($FD, $IOV, $IOVCNT)
+          - focus-metavariable: $IOV
+      - pattern: readv($FD, $IOV, $IOVCNT)
 
-  - id: python-ssrf-sinks
-    languages: [python]
-    severity: WARNING
-    message: "Outbound HTTP request sink can be abused for SSRF if URL is user-controlled."
-    metadata:
-      category: ssrf
-      checklist: "3. Server-Side Request & Parser Flaws"
-    pattern-either:
-      - pattern: requests.get(...)
-      - pattern: requests.post(...)
-      - pattern: requests.put(...)
-      - pattern: requests.delete(...)
-      - pattern: requests.head(...)
-      - pattern: requests.patch(...)
-      - pattern: requests.request(...)
-      - pattern: urllib.request.urlopen(...)
-      - pattern: httpx.get(...)
-      - pattern: httpx.post(...)
-      - pattern: httpx.AsyncClient(...).get(...)
-      - pattern: httpx.AsyncClient(...).post(...)
+      - patterns:
+          - pattern: fread($BUF, $SIZE, $COUNT, $STREAM)
+          - focus-metavariable: $BUF
+      - pattern: fread($BUF, $SIZE, $COUNT, $STREAM)
 
-  - id: python-xxe-parser-usage
-    languages: [python]
-    severity: INFO
-    message: "XML parsing can be vulnerable to XXE if external entity processing is enabled."
-    metadata:
-      category: parser
-      checklist: "3. Server-Side Request & Parser Flaws"
-    pattern-either:
-      - pattern: lxml.etree.parse(...)
-      - pattern: lxml.etree.fromstring(...)
-      - pattern: xml.etree.ElementTree.parse(...)
-      - pattern: xml.etree.ElementTree.fromstring(...)
-      - pattern: xml.dom.expatbuilder.parse(...)
+      - patterns:
+          - pattern: fgets($BUF, $SIZE, $STREAM)
+          - focus-metavariable: $BUF
 
-  - id: python-insecure-deserialization
-    languages: [python]
-    severity: ERROR
-    message: "Insecure deserialization can lead to remote code execution."
-    metadata:
-      category: deserialization
-      checklist: "3. Server-Side Request & Parser Flaws"
-    pattern-either:
-      - pattern: pickle.load(...)
-      - pattern: pickle.loads(...)
-      - pattern: cPickle.load(...)
-      - pattern: cPickle.loads(...)
-      - pattern: marshal.load(...)
-      - pattern: marshal.loads(...)
-      - pattern: yaml.load(...)
-      - pattern: yaml.unsafe_load(...)
-      - pattern: jsonpickle.decode(...)
+      - patterns:
+          - pattern: gets($BUF)
+          - focus-metavariable: $BUF
 
-  - id: python-archive-extraction
-    languages: [python]
-    severity: WARNING
-    message: "Archive extraction without path or size checks can lead to zip-slip or decompression bombs."
-    metadata:
-      category: file
-      checklist: "3. Server-Side Request & Parser Flaws"
-    pattern-either:
-      - pattern: '$TAR.extractall(...)'
-      - pattern: '$ZIP.extractall(...)'
-      - pattern: shutil.unpack_archive(...)
+      - patterns:
+          - pattern: scanf("%s", $BUF)
+          - focus-metavariable: $BUF
 
-  - id: python-path-traversal-with-request-input
-    languages: [python]
-    severity: ERROR
-    message: "File operation uses request input; enforce canonical path containment."
-    metadata:
-      category: file
-      checklist: "4. File Handling"
-    patterns:
-      - pattern-either:
-          - pattern: open(...)
-          - pattern: send_file(...)
-          - pattern: send_from_directory(...)
-          - pattern: os.path.join(...)
-      - pattern-either:
-          - pattern: request.args.get(...)
-          - pattern: request.args[...]
-          - pattern: request.form.get(...)
-          - pattern: request.form[...]
-          - pattern: request.values.get(...)
-          - pattern: request.values[...]
-          - pattern: request.json
-          - pattern: request.get_json(...)
-          - pattern: request.data
-          - pattern: request.files
+      - patterns:
+          - pattern: fscanf($FILE, "%s", $BUF)
+          - focus-metavariable: $BUF
 
-  - id: python-tempfile-race
-    languages: [python]
-    severity: WARNING
-    message: "tempfile.mktemp is unsafe due to race conditions; use mkstemp or NamedTemporaryFile."
-    metadata:
-      category: file
-      checklist: "4. File Handling"
-    pattern: tempfile.mktemp(...)
+      - patterns:
+          - pattern: sscanf($SRC, "%s", $BUF)
+          - focus-metavariable: $BUF
 
-  - id: python-mass-assignment
-    languages: [python]
-    severity: WARNING
-    message: "Object construction or update from request data may allow mass assignment."
-    metadata:
-      category: authorization
-      checklist: "6. Authorization"
-    pattern-either:
-      - pattern: '$MODEL(**request.json)'
-      - pattern: '$OBJ.update(request.json)'
-      - pattern: '$OBJ.update(**request.json)'
-      - pattern: '$OBJ.__dict__.update(request.json)'
-      - pattern: 'setattr($OBJ, $FIELD, request.json.get(...))'
+      - patterns:
+          - pattern: std::getline($STREAM, $STR)
+          - focus-metavariable: $STR
 
-  - id: python-weak-password-hash
-    languages: [python]
-    severity: WARNING
-    message: "Weak hash algorithm for credential storage; use bcrypt, scrypt, or Argon2."
-    metadata:
-      category: auth
-      checklist: "5. Authentication"
-    pattern-either:
-      - pattern: hashlib.md5(...)
-      - pattern: hashlib.sha1(...)
-      - pattern: hashlib.sha256(...)
+      - patterns:
+          - pattern: getline($STREAM, $STR)
+          - focus-metavariable: $STR
 
-  - id: python-jwt-verification-disabled
-    languages: [python]
-    severity: ERROR
-    message: "JWT signature verification is disabled."
-    metadata:
-      category: auth
-      checklist: "5. Authentication"
-    pattern-either:
-      - pattern: 'jwt.decode(..., options={..., "verify_signature": False, ...})'
-      - pattern: 'jwt.decode(..., verify=False, ...)'
+      - patterns:
+          - pattern: std::cin >> $X
+          - focus-metavariable: $X
 
-  - id: python-tls-disabled
-    languages: [python]
-    severity: ERROR
-    message: "TLS certificate verification is disabled."
-    metadata:
-      category: crypto
-      checklist: "8. Cryptography"
-    pattern-either:
-      - pattern: requests.get(..., verify=False, ...)
-      - pattern: requests.post(..., verify=False, ...)
-      - pattern: requests.put(..., verify=False, ...)
-      - pattern: requests.delete(..., verify=False, ...)
-      - pattern: httpx.Client(..., verify=False, ...)
-      - pattern: httpx.AsyncClient(..., verify=False, ...)
-      - pattern: ssl._create_unverified_context(...)
+      - patterns:
+          - pattern: $STREAM >> $X
+          - focus-metavariable: $X
 
-  - id: python-crypto-ecb
-    languages: [python]
-    severity: ERROR
-    message: "ECB mode is insecure; use authenticated encryption such as AES-GCM or ChaCha20-Poly1305."
-    metadata:
-      category: crypto
-      checklist: "8. Cryptography"
-    pattern-either:
-      - pattern: AES.new(..., AES.MODE_ECB, ...)
-      - pattern: Cipher(algorithms.AES(...), modes.ECB(...), ...)
+      - patterns:
+          - pattern: $STREAM.read($BUF, $LEN)
+          - focus-metavariable: $BUF
+      - pattern: $STREAM.read($BUF, $LEN)
 
-  - id: python-insecure-random
-    languages: [python]
-    severity: INFO
-    message: "random module is not cryptographically secure; use secrets for tokens or keys."
-    metadata:
-      category: crypto
-      checklist: "8. Cryptography"
-    pattern-either:
-      - pattern: random.random(...)
-      - pattern: random.randint(...)
-      - pattern: random.randrange(...)
-      - pattern: random.choice(...)
-      - pattern: random.shuffle(...)
+      - patterns:
+          - pattern: $STREAM.readsome($BUF, $LEN)
+          - focus-metavariable: $BUF
 
-  - id: python-debug-enabled
-    languages: [python]
-    severity: WARNING
-    message: "Debug mode is enabled."
-    metadata:
-      category: config
-      checklist: "9. Secrets & Configuration"
-    pattern-either:
-      - pattern: app.run(..., debug=True, ...)
-      - pattern: DEBUG = True
+      - patterns:
+          - pattern: $STREAM.getline($BUF, $LEN)
+          - focus-metavariable: $BUF
 
-  - id: js-code-injection
-    languages: [javascript, typescript]
-    severity: ERROR
-    message: "Dynamic code execution or shell execution may allow code injection."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    pattern-either:
-      - pattern: eval(...)
-      - pattern: new Function(...)
-      - pattern: 'setTimeout("...")'
-      - pattern: 'setInterval("...")'
-      - pattern: vm.runInContext(...)
-      - pattern: vm.runInNewContext(...)
-      - pattern: child_process.exec(...)
-      - pattern: child_process.execSync(...)
-      - pattern: $CP.exec(...)
-      - pattern: $CP.execSync(...)
+      - patterns:
+          - pattern: $STREAM.get($BUF, $LEN)
+          - focus-metavariable: $BUF
 
-  - id: js-xss-sinks
-    languages: [javascript, typescript]
-    severity: ERROR
-    message: "HTML injection sink may allow XSS."
-    metadata:
-      category: web
-      checklist: "2. Client-Side & Web Flaws"
-    pattern-either:
-      - pattern: '$EL.innerHTML = ...'
-      - pattern: '$EL.outerHTML = ...'
-      - pattern: document.write(...)
-      - pattern: document.writeln(...)
-      - pattern: '$EL.insertAdjacentHTML(...)'
-      - pattern: '$X.dangerouslySetInnerHTML = ...'
-      - pattern: '<$TAG dangerouslySetInnerHTML={...} />'
+      - patterns:
+          - pattern: $SOCK.recv($BUF, $LEN, ...)
+          - focus-metavariable: $BUF
 
-  - id: js-open-redirect
-    languages: [javascript, typescript]
-    severity: WARNING
-    message: "Redirect target comes from request input; validate against an allowlist."
-    metadata:
-      category: web
-      checklist: "2. Client-Side & Web Flaws"
-    pattern-either:
-      - pattern: window.location = $REQ.query.$X
-      - pattern: window.location.href = $REQ.query.$X
-      - pattern: window.location.assign($REQ.query.$X)
-      - pattern: window.location.replace($REQ.query.$X)
-      - pattern: $RES.redirect($REQ.query.$X)
+      - patterns:
+          - pattern: $SOCK.receive($BUF, $LEN)
+          - focus-metavariable: $BUF
 
-  - id: js-ssrf-sinks
-    languages: [javascript, typescript]
-    severity: WARNING
-    message: "Outbound HTTP sink can be abused for SSRF if URL is user-controlled."
-    metadata:
-      category: ssrf
-      checklist: "3. Server-Side Request & Parser Flaws"
-    pattern-either:
-      - pattern: fetch(...)
-      - pattern: axios.get(...)
-      - pattern: axios.post(...)
-      - pattern: axios.put(...)
-      - pattern: axios.delete(...)
-      - pattern: $HTTP.get(...)
-      - pattern: $HTTP.post(...)
+      - patterns:
+          - pattern: $CONN.read($BUF, $LEN)
+          - focus-metavariable: $BUF
 
-  - id: js-prototype-pollution
-    languages: [javascript, typescript]
-    severity: ERROR
-    message: "Direct modification of prototype properties may allow prototype pollution."
-    metadata:
-      category: web
-      checklist: "2. Client-Side & Web Flaws"
-    pattern-either:
-      - pattern: '$OBJ.__proto__ = ...'
-      - pattern: '$OBJ["__proto__"] = ...'
-      - pattern: "$OBJ['__proto__'] = ..."
-      - pattern: '$OBJ.constructor.prototype = ...'
+      - patterns:
+          - pattern: $READER.read($BUF, $LEN)
+          - focus-metavariable: $BUF
 
-  - id: js-node-tls-disabled
-    languages: [javascript, typescript]
-    severity: ERROR
-    message: "TLS certificate validation is disabled."
-    metadata:
-      category: crypto
-      checklist: "8. Cryptography"
-    pattern-regex: 'rejectUnauthorized\s*:\s*false'
+      - patterns:
+          - pattern: readBinary($X)
+          - focus-metavariable: $X
 
-  - id: js-insecure-random
-    languages: [javascript, typescript]
-    severity: INFO
-    message: "Math.random is not cryptographically secure; use crypto.getRandomValues or crypto.randomBytes."
-    metadata:
-      category: crypto
-      checklist: "8. Cryptography"
-    pattern: Math.random(...)
+      - patterns:
+          - pattern: readString($X)
+          - focus-metavariable: $X
 
-  - id: java-sqli-dynamic-query
-    languages: [java]
-    severity: ERROR
-    message: "Dynamic SQL query construction may allow SQL injection. Use prepared statements."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    pattern-either:
-      - pattern: '$STMT.executeQuery($SQL + ...)'
-      - pattern: '$STMT.execute($SQL + ...)'
-      - pattern: '$STMT.executeUpdate($SQL + ...)'
-      - pattern: '$CONN.prepareStatement($SQL + ...)'
-      - pattern: '$CONN.createStatement(...).executeQuery($SQL + ...)'
+      - patterns:
+          - pattern: readStringText($X)
+          - focus-metavariable: $X
 
-  - id: java-command-injection
-    languages: [java]
-    severity: ERROR
-    message: "Process execution may allow OS command injection."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    pattern-either:
-      - pattern: Runtime.getRuntime().exec(...)
-      - pattern: new ProcessBuilder(...).start()
+      - patterns:
+          - pattern: readIntBinary($X)
+          - focus-metavariable: $X
 
-  - id: java-expression-injection
-    languages: [java]
-    severity: ERROR
-    message: "Expression language parsing may allow expression injection."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    pattern-either:
-      - pattern: '$PARSER.parseExpression(...)'
-      - pattern: Ognl.getValue(...)
+      - patterns:
+          - pattern: readUIntBinary($X)
+          - focus-metavariable: $X
 
-  - id: java-xxe-parser-construction
-    languages: [java]
-    severity: INFO
-    message: "XML parser construction can be vulnerable to XXE if external entities are not disabled."
-    metadata:
-      category: parser
-      checklist: "3. Server-Side Request & Parser Flaws"
-    pattern-either:
-      - pattern: DocumentBuilderFactory.newInstance()
-      - pattern: SAXParserFactory.newInstance()
-      - pattern: XMLInputFactory.newInstance()
-      - pattern: TransformerFactory.newInstance()
+      - patterns:
+          - pattern: readVarUInt($X)
+          - focus-metavariable: $X
 
-  - id: java-insecure-deserialization
-    languages: [java]
-    severity: ERROR
-    message: "Java deserialization can lead to remote code execution."
-    metadata:
-      category: deserialization
-      checklist: "3. Server-Side Request & Parser Flaws"
-    pattern-either:
-      - pattern: new ObjectInputStream(...).readObject()
-      - pattern: '$OIS.readObject()'
+      - patterns:
+          - pattern: readVarInt($X)
+          - focus-metavariable: $X
 
-  - id: php-injection-sinks
-    languages: [php]
-    severity: ERROR
-    message: "Command execution, code evaluation, or deserialization sink detected."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    pattern-either:
-      - pattern: system(...)
-      - pattern: exec(...)
-      - pattern: passthru(...)
-      - pattern: shell_exec(...)
-      - pattern: popen(...)
-      - pattern: proc_open(...)
-      - pattern: eval(...)
-      - pattern: unserialize(...)
+      - patterns:
+          - pattern: readIntText($X)
+          - focus-metavariable: $X
 
-  - id: php-sqli-dynamic-query
-    languages: [php]
-    severity: ERROR
-    message: "Dynamic SQL query construction may allow SQL injection. Use prepared statements."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    pattern-either:
-      - pattern: mysqli_query($CONN, $SQL . ...)
-      - pattern: '$CONN->query($SQL . ...)'
-      - pattern: '$PDO->query($SQL . ...)'
+      - patterns:
+          - pattern: readUIntText($X)
+          - focus-metavariable: $X
 
-  - id: go-command-injection
-    languages: [go]
-    severity: ERROR
-    message: "Shell execution may allow OS command injection."
-    metadata:
-      category: injection
-      checklist: "1. Injection"
-    pattern-either:
-      - pattern: 'exec.Command("sh", "-c", ...)'
-      - pattern: 'exec.Command("/bin/sh", "-c", ...)'
-      - pattern: 'exec.CommandContext($CTX, "sh", "-c", ...)'
-      - pattern: 'exec.CommandContext($CTX, "/bin/sh", "-c", ...)'
+      - patterns:
+          - pattern: deserializeBinary($X)
+          - focus-metavariable: $X
 
-  - id: go-tls-disabled
-    languages: [go]
-    severity: ERROR
-    message: "TLS certificate verification is disabled."
-    metadata:
-      category: crypto
-      checklist: "8. Cryptography"
-    pattern: 'InsecureSkipVerify: true'
+      - patterns:
+          - pattern: deserializeText($X)
+          - focus-metavariable: $X
+
+      - patterns:
+          - pattern: $IN.readBinary($X)
+          - focus-metavariable: $X
+
+      - patterns:
+          - pattern: $IN.readString($X)
+          - focus-metavariable: $X
+
+      - patterns:
+          - pattern: $IN.deserializeBinary($X)
+          - focus-metavariable: $X
+
+      - pattern: $CFG.getString(...)
+      - pattern: $CFG.getStringRef(...)
+      - pattern: $CFG.getInt(...)
+      - pattern: $CFG.getUInt(...)
+      - pattern: $CFG.getUInt64(...)
+      - pattern: $CFG.getBool(...)
+      - pattern: $CFG.getDouble(...)
+
+      - pattern: $REQ.getParameter(...)
+      - pattern: $REQ.getQueryParameter(...)
+      - pattern: $REQ.getHeader(...)
+      - pattern: $REQ.getURI()
+      - pattern: $REQ.getPath()
+      - pattern: $REQ.getQuery()
+      - pattern: $REQ.getHost()
+      - pattern: $REQ.getBody()
+      - pattern: $REQ.body
+
+      - pattern: nlohmann::json::parse(...)
+      - pattern: YAML::Load(...)
+      - pattern: cJSON_Parse(...)
+      - pattern: cJSON_GetObjectItem(...)
+      - pattern: cJSON_GetObjectItemCaseSensitive(...)
+      - pattern: $JSON.parse($INPUT)
+      - pattern: $PARSER.parse($INPUT)
+
+      - patterns:
+          - pattern: $DOC.Parse($INPUT)
+          - focus-metavariable: $DOC
+
+      - patterns:
+          - pattern: boost::property_tree::read_xml($STREAM, $PT)
+          - focus-metavariable: $PT
+
+      - patterns:
+          - pattern: boost::property_tree::read_json($STREAM, $PT)
+          - focus-metavariable: $PT
+
+      - patterns:
+          - pattern: boost::property_tree::read_ini($STREAM, $PT)
+          - focus-metavariable: $PT
+
+    pattern-sanitizers:
+      - pattern: sizeof(...)
+      - pattern: 'sizeof $X'
+      - pattern: alignof(...)
+      - pattern: std::min(...)
+      - pattern: std::min<$T>(...)
+      - pattern: std::clamp(...)
+      - pattern: std::clamp<$T>(...)
+      - pattern: std::numeric_limits<$T>::max()
+      - pattern: checked_cast<$T>(...)
+      - pattern: Poco::checked_cast<$T>(...)
+      - pattern: boost::numeric_cast<$T>(...)
+      - pattern: absl::CheckedNumeric<$T>(...)
+      - pattern: strnlen($STR, $MAX)
+      - pattern: wcsnlen($STR, $MAX)
+
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: memcpy($DST, $SRC, $SIZE)
+              - pattern: __builtin_memcpy($DST, $SRC, $SIZE)
+              - pattern: std::memcpy($DST, $SRC, $SIZE)
+              - pattern: memmove($DST, $SRC, $SIZE)
+              - pattern: __builtin_memmove($DST, $SRC, $SIZE)
+              - pattern: std::memmove($DST, $SRC, $SIZE)
+              - pattern: bcopy($SRC, $DST, $SIZE)
+              - pattern: memccpy($DST, $SRC, $C, $SIZE)
+              - pattern: CopyMemory($DST, $SRC, $SIZE)
+              - pattern: RtlCopyMemory($DST, $SRC, $SIZE)
+
+          - pattern-not: memcpy($DST, $SRC, sizeof($X))
+          - pattern-not: memcpy($DST, $SRC, 'sizeof $X')
+          - pattern-not: __builtin_memcpy($DST, $SRC, sizeof($X))
+          - pattern-not: __builtin_memcpy($DST, $SRC, 'sizeof $X')
+          - pattern-not: std::memcpy($DST, $SRC, sizeof($X))
+          - pattern-not: std::memcpy($DST, $SRC, 'sizeof $X')
+          - pattern-not: memmove($DST, $SRC, sizeof($X))
+          - pattern-not: memmove($DST, $SRC, 'sizeof $X')
+          - pattern-not: __builtin_memmove($DST, $SRC, sizeof($X))
+          - pattern-not: __builtin_memmove($DST, $SRC, 'sizeof $X')
+          - pattern-not: std::memmove($DST, $SRC, sizeof($X))
+          - pattern-not: std::memmove($DST, $SRC, 'sizeof $X')
+          - pattern-not: bcopy($SRC, $DST, sizeof($X))
+          - pattern-not: bcopy($SRC, $DST, 'sizeof $X')
+
+          - pattern-not: memcpy($DST, $SRC, std::min($A, $B))
+          - pattern-not: memcpy($DST, $SRC, std::min<$T>($A, $B))
+          - pattern-not: memcpy($DST, $SRC, std::clamp($A, $B, $C))
+          - pattern-not: memmove($DST, $SRC, std::min($A, $B))
+          - pattern-not: memmove($DST, $SRC, std::min<$T>($A, $B))
+          - pattern-not: memmove($DST, $SRC, std::clamp($A, $B, $C))
+          - pattern-not: std::memcpy($DST, $SRC, std::min($A, $B))
+          - pattern-not: std::memcpy($DST, $SRC, std::min<$T>($A, $B))
+          - pattern-not: std::memmove($DST, $SRC, std::min($A, $B))
+          - pattern-not: std::memmove($DST, $SRC, std::min<$T>($A, $B))
+
+          - pattern-not-inside: |
+              if ($SIZE <= $CAP) {
+                ...
+              }
+          - pattern-not-inside: |
+              if ($SIZE < $CAP) {
+                ...
+              }
+          - pattern-not-inside: |
+              if ($CAP >= $SIZE) {
+                ...
+              }
+          - pattern-not-inside: |
+              if ($CAP > $SIZE) {
+                ...
+              }
+          - pattern-not-inside: |
+              assert($SIZE <= $CAP);
+              ...
+          - pattern-not-inside: |
+              assert($SIZE < $CAP);
+              ...
+          - pattern-not-inside: |
+              $SIZE = std::min($A, $B);
+              ...
+          - pattern-not-inside: |
+              $SIZE = std::clamp($A, $B, $C);
+              ...
+
+      - patterns:
+          - pattern-either:
+              - pattern: strcpy($DST, $SRC)
+              - pattern: strcat($DST, $SRC)
+              - pattern: stpcpy($DST, $SRC)
+              - pattern: wcscpy($DST, $SRC)
+              - pattern: wcscat($DST, $SRC)
+              - pattern: strncpy($DST, $SRC, $SIZE)
+              - pattern: strncat($DST, $SRC, $SIZE)
+              - pattern: wcsncpy($DST, $SRC, $SIZE)
+              - pattern: wcsncat($DST, $SRC, $SIZE)
+
+      - patterns:
+          - pattern-either:
+              - pattern: sprintf($BUF, $FMT, ...)
+              - pattern: vsprintf($BUF, $FMT, $ARGS)
+
+      - patterns:
+          - pattern-either:
+              - pattern: std::copy($SRC_BEGIN, $SRC_END, $DST)
+              - pattern: std::copy_n($SRC, $COUNT, $DST)
 
   - id: c-memory-unsafe-functions
     languages: [c, cpp]
-    severity: WARNING
-    message: "Unsafe memory or string function may cause memory corruption."
-    metadata:
-      category: memory
-      checklist: "11. Memory Safety"
-    pattern-either:
-      - pattern: strcpy(...)
-      - pattern: sprintf(...)
-      - pattern: gets(...)
-      - pattern: 'scanf("%s", ...)'
-      - pattern: memcpy(...)
-
-  - id: c-format-string
-    languages: [c, cpp]
     severity: ERROR
-    message: "Non-constant format string may allow format string exploitation."
+    message: "Unsafe memory or string operation detected. Fixed-size and explicitly bounded memcpy-style copies are excluded."
     metadata:
       category: memory
       checklist: "11. Memory Safety"
+      cwe:
+        - "CWE-120: Buffer Copy without Checking Size of Input"
+        - "CWE-676: Use of Potentially Dangerous Function"
     patterns:
       - pattern-either:
-          - pattern: printf($X)
-          - pattern: fprintf($F, $X)
-      - pattern-not: 'printf("...")'
-      - pattern-not: 'fprintf($F, "...")'
+          - pattern: strcpy($DST, $SRC)
+          - pattern: strcat($DST, $SRC)
+          - pattern: gets($BUF)
+          - pattern: scanf("%s", $ARG)
+          - pattern: fscanf($FILE, "%s", $ARG)
+          - pattern: sscanf($SRC, "%s", $ARG)
 
-  - id: secrets-known-key-patterns
-    languages: [generic]
+          - patterns:
+              - pattern: sprintf($BUF, $FMT, ...)
+              - pattern-not: sprintf($BUF, "...", ...)
+              - pattern-not: sprintf($BUF, "...")
+
+          - patterns:
+              - pattern-either:
+                  - pattern: memcpy($DST, $SRC, $SIZE)
+                  - pattern: __builtin_memcpy($DST, $SRC, $SIZE)
+                  - pattern: std::memcpy($DST, $SRC, $SIZE)
+                  - pattern: memmove($DST, $SRC, $SIZE)
+                  - pattern: __builtin_memmove($DST, $SRC, $SIZE)
+                  - pattern: std::memmove($DST, $SRC, $SIZE)
+                  - pattern: bcopy($SRC, $DST, $SIZE)
+
+              - pattern-not: memcpy($DST, $SRC, sizeof($X))
+              - pattern-not: memcpy($DST, $SRC, 'sizeof $X')
+              - pattern-not: __builtin_memcpy($DST, $SRC, sizeof($X))
+              - pattern-not: __builtin_memcpy($DST, $SRC, 'sizeof $X')
+              - pattern-not: std::memcpy($DST, $SRC, sizeof($X))
+              - pattern-not: std::memcpy($DST, $SRC, 'sizeof $X')
+              - pattern-not: memmove($DST, $SRC, sizeof($X))
+              - pattern-not: memmove($DST, $SRC, 'sizeof $X')
+              - pattern-not: __builtin_memmove($DST, $SRC, sizeof($X))
+              - pattern-not: __builtin_memmove($DST, $SRC, 'sizeof $X')
+              - pattern-not: std::memmove($DST, $SRC, sizeof($X))
+              - pattern-not: std::memmove($DST, $SRC, 'sizeof $X')
+              - pattern-not: bcopy($SRC, $DST, sizeof($X))
+              - pattern-not: bcopy($SRC, $DST, 'sizeof $X')
+
+              - pattern-not: memcpy($DST, $SRC, std::min($A, $B))
+              - pattern-not: memcpy($DST, $SRC, std::min<$T>($A, $B))
+              - pattern-not: memcpy($DST, $SRC, std::clamp($A, $B, $C))
+              - pattern-not: memmove($DST, $SRC, std::min($A, $B))
+              - pattern-not: memmove($DST, $SRC, std::min<$T>($A, $B))
+              - pattern-not: memmove($DST, $SRC, std::clamp($A, $B, $C))
+              - pattern-not: std::memcpy($DST, $SRC, std::min($A, $B))
+              - pattern-not: std::memcpy($DST, $SRC, std::min<$T>($A, $B))
+              - pattern-not: std::memmove($DST, $SRC, std::min($A, $B))
+              - pattern-not: std::memmove($DST, $SRC, std::min<$T>($A, $B))
+
+              - pattern-not-inside: |
+                  if ($SIZE <= $CAP) {
+                    ...
+                  }
+              - pattern-not-inside: |
+                  if ($SIZE < $CAP) {
+                    ...
+                  }
+              - pattern-not-inside: |
+                  if ($CAP >= $SIZE) {
+                    ...
+                  }
+              - pattern-not-inside: |
+                  if ($CAP > $SIZE) {
+                    ...
+                  }
+              - pattern-not-inside: |
+                  assert($SIZE <= $CAP);
+                  ...
+              - pattern-not-inside: |
+                  assert($SIZE < $CAP);
+                  ...
+              - pattern-not-inside: |
+                  $SIZE = std::min($A, $B);
+                  ...
+              - pattern-not-inside: |
+                  $SIZE = std::clamp($A, $B, $C);
+                  ...
+
+              - metavariable-pattern:
+                  metavariable: $SIZE
+                  patterns:
+                    - pattern-not-regex: '^\s*([0-9]+[uUlL]*|std::min\s*(<[^>]*>)?\s*\([^()]*\)|std::clamp\s*(<[^>]*>)?\s*\([^()]*\))\s*$'
+
+  - id: cpp-taint-untrusted-allocation-arithmetic
+    mode: taint
+    languages: [c, cpp]
     severity: ERROR
-    message: "Potential hardcoded secret detected."
+    message: "Untrusted input participates in allocation arithmetic without an overflow-safe computation."
     metadata:
-      category: secrets
-      checklist: "9. Secrets & Configuration"
-    pattern-either:
-      - pattern-regex: 'AKIA[0-9A-Z]{16}'
-      - pattern-regex: 'ASIA[0-9A-Z]{16}'
-      - pattern-regex: 'gh[pousr]_[A-Za-z0-9]{36,}'
-      - pattern-regex: 'github_pat_[0-9A-Za-z_]{22,}'
-      - pattern-regex: 'sk_live_[0-9a-zA-Z]{24,}'
-      - pattern-regex: 'xox[baprs]-[0-9A-Za-z-]{10,}'
-      - pattern-regex: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
-      - pattern-regex: '(postgres|postgresql|mysql|mongodb|mongodb\+srv|redis|amqp|jdbc:[a-z0-9]+)://[^:/\s]+:[^@\s]+@'
-      - pattern-regex: '[MNT][A-Za-z0-9]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}'
+      category: memory
+      checklist: "11. Memory Safety"
+      cwe:
+        - "CWE-190: Integer Overflow or Wraparound"
+        - "CWE-122: Heap-based Buffer Overflow"
+      confidence: HIGH
+    options:
+      symbolic_propagation: true
+    pattern-sources: *untrusted_input_sources
+    pattern-sanitizers:
+      - pattern: __builtin_mul_overflow(...)
+      - pattern: __builtin_add_overflow(...)
+      - pattern: __builtin_sub_overflow(...)
+      - pattern: std::min(...)
+      - pattern: std::min<$T>(...)
+      - pattern: std::clamp(...)
+      - pattern: std::clamp<$T>(...)
+      - pattern: checked_cast<$T>(...)
+      - pattern: Poco::checked_cast<$T>(...)
+      - pattern: boost::numeric_cast<$T>(...)
+      - pattern: absl::CheckedNumeric<$T>(...)
+      - pattern: base::CheckMul(...)
+      - pattern: base::CheckAdd(...)
+      - pattern: CheckedMul(...)
+      - pattern: CheckedAdd(...)
+      - pattern: safe_mul(...)
+      - pattern: safe_add(...)
 
-  - id: iac-dockerfile-root-user
-    languages: [generic]
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: malloc($X * $Y)
+              - pattern: malloc($X + $Y)
+              - pattern: malloc($X << $SHIFT)
+              - pattern: realloc($PTR, $X * $Y)
+              - pattern: realloc($PTR, $X + $Y)
+              - pattern: realloc($PTR, $X << $SHIFT)
+              - pattern: calloc($X * $Y, $Z)
+              - pattern: calloc($X, $Y * $Z)
+              - pattern: calloc($X + $Y, $Z)
+              - pattern: alloca($X * $Y)
+              - pattern: alloca($X + $Y)
+              - pattern: aligned_alloc($ALIGN, $X * $Y)
+              - pattern: aligned_alloc($ALIGN, $X + $Y)
+              - pattern: posix_memalign($PTR, $ALIGN, $X * $Y)
+              - pattern: new $T[$X * $Y]
+              - pattern: new $T[$X + $Y]
+              - pattern: new $T[$X << $SHIFT]
+              - pattern: std::make_unique<$T[]>($X * $Y)
+              - pattern: std::make_unique<$T[]>($X + $Y)
+              - pattern: std::make_unique<$T[]>($X << $SHIFT)
+
+          - pattern-not-inside: |
+              if (__builtin_mul_overflow($X, $Y, ...)) {
+                ...
+              }
+          - pattern-not-inside: |
+              if (__builtin_add_overflow($X, $Y, ...)) {
+                ...
+              }
+          - pattern-not-inside: |
+              if ($X > $MAX / $Y) {
+                ...
+              }
+          - pattern-not-inside: |
+              if ($Y > $MAX / $X) {
+                ...
+              }
+          - pattern-not-inside: |
+              if ($Y != 0 && $X > $MAX / $Y) {
+                ...
+              }
+          - pattern-not-inside: |
+              if ($X > std::numeric_limits<$SIZE_T>::max() / $Y) {
+                ...
+              }
+          - pattern-not-inside: |
+              if ($X <= $MAX - $Y) {
+                ...
+              }
+          - pattern-not-inside: |
+              $OK = __builtin_mul_overflow($X, $Y, ...);
+              ...
+          - pattern-not-inside: |
+              $OK = __builtin_add_overflow($X, $Y, ...);
+              ...
+
+  - id: cpp-integer-overflow-in-allocation
+    languages: [c, cpp]
     severity: WARNING
-    message: "Container runs as root."
+    message: "Allocation size uses raw arithmetic. Add explicit overflow checks before allocating."
     metadata:
-      category: iac
-      checklist: "10. Infrastructure-as-Code & CI/CD"
-    paths:
-      include:
-        - "*Dockerfile*"
-        - "*.dockerfile"
-    pattern-regex: '^\s*USER\s+root'
+      category: memory
+      checklist: "11. Memory Safety"
+      cwe:
+        - "CWE-190: Integer Overflow or Wraparound"
+        - "CWE-131: Incorrect Calculation of Buffer Size"
+    patterns:
+      - pattern-either:
+          - pattern: malloc($X * $Y)
+          - pattern: malloc($X + $Y)
+          - pattern: malloc($X << $SHIFT)
+          - pattern: realloc($PTR, $X * $Y)
+          - pattern: realloc($PTR, $X + $Y)
+          - pattern: realloc($PTR, $X << $SHIFT)
+          - pattern: calloc($X * $Y, $Z)
+          - pattern: calloc($X, $Y * $Z)
+          - pattern: calloc($X + $Y, $Z)
+          - pattern: alloca($X * $Y)
+          - pattern: alloca($X + $Y)
+          - pattern: aligned_alloc($ALIGN, $X * $Y)
+          - pattern: aligned_alloc($ALIGN, $X + $Y)
+          - pattern: posix_memalign($PTR, $ALIGN, $X * $Y)
+          - pattern: new $T[$X * $Y]
+          - pattern: new $T[$X + $Y]
+          - pattern: new $T[$X << $SHIFT]
+          - pattern: std::make_unique<$T[]>($X * $Y)
+          - pattern: std::make_unique<$T[]>($X + $Y)
+          - pattern: std::make_unique<$T[]>($X << $SHIFT)
 
-  - id: iac-dockerfile-curl-pipe-shell
-    languages: [generic]
+      - pattern-not-inside: |
+          if (__builtin_mul_overflow($X, $Y, ...)) {
+            ...
+          }
+      - pattern-not-inside: |
+          if (__builtin_add_overflow($X, $Y, ...)) {
+            ...
+          }
+      - pattern-not-inside: |
+          if ($X > $MAX / $Y) {
+            ...
+          }
+      - pattern-not-inside: |
+          if ($Y > $MAX / $X) {
+            ...
+          }
+      - pattern-not-inside: |
+          if ($Y != 0 && $X > $MAX / $Y) {
+            ...
+          }
+      - pattern-not-inside: |
+          if ($X > std::numeric_limits<$SIZE_T>::max() / $Y) {
+            ...
+          }
+      - pattern-not-inside: |
+          if ($X <= $MAX - $Y) {
+            ...
+          }
+      - pattern-not-inside: |
+          if (($X + $Y) < $X) {
+            ...
+          }
+      - pattern-not-inside: |
+          if (($X * $Y) / $Y != $X) {
+            ...
+          }
+      - pattern-not-inside: |
+          $OK = __builtin_mul_overflow($X, $Y, ...);
+          ...
+      - pattern-not-inside: |
+          $OK = __builtin_add_overflow($X, $Y, ...);
+          ...
+
+  - id: cpp-taint-format-string-injection
+    mode: taint
+    languages: [c, cpp]
     severity: ERROR
-    message: "Remote script is piped into a shell."
+    message: "Untrusted data is used as a format string or log message. Use a fixed format such as \"%s\" and pass untrusted data as an argument."
     metadata:
-      category: iac
-      checklist: "10. Infrastructure-as-Code & CI/CD"
-    paths:
-      include:
-        - "*Dockerfile*"
-        - "*.dockerfile"
-    pattern-regex: 'curl\s+[^\n]*\|\s*(ba|z)?sh'
+      category: injection
+      checklist: "1. Injection"
+      cwe:
+        - "CWE-134: Use of Externally-Controlled Format String"
+      confidence: HIGH
+    options:
+      symbolic_propagation: true
+    pattern-sources: *untrusted_input_sources
+    pattern-sinks:
+      - patterns:
+          - pattern: printf($FMT, ...)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: fprintf($FILE, $FMT, ...)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: sprintf($BUF, $FMT, ...)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: snprintf($BUF, $SIZE, $FMT, ...)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: vprintf($FMT, $ARGS)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: vsprintf($BUF, $FMT, $ARGS)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: vsnprintf($BUF, $SIZE, $FMT, $ARGS)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: syslog($PRI, $FMT, ...)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: err($STATUS, $FMT, ...)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: warn($FMT, ...)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: warnx($FMT, ...)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: fmt::print($FMT, ...)
+          - focus-metavariable: $FMT
+      - patterns:
+          - pattern: fmt::format($FMT, ...)
+          - focus-metavariable: $FMT
 
-  - id: iac-k8s-privileged-container
-    languages: [generic]
+      - patterns:
+          - pattern: LOG_ERROR($LOGGER, $MSG)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: LOG_WARNING($LOGGER, $MSG)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: LOG_INFO($LOGGER, $MSG)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: LOG_DEBUG($LOGGER, $MSG)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: LOG_TRACE($LOGGER, $MSG)
+          - focus-metavariable: $MSG
+
+      - patterns:
+          - pattern: LOG_ERROR($MSG)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: LOG_WARNING($MSG)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: LOG_INFO($MSG)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: LOG_DEBUG($MSG)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: LOG_TRACE($MSG)
+          - focus-metavariable: $MSG
+
+      - patterns:
+          - pattern: spdlog::trace($MSG, ...)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: spdlog::debug($MSG, ...)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: spdlog::info($MSG, ...)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: spdlog::warn($MSG, ...)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: spdlog::error($MSG, ...)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: spdlog::critical($MSG, ...)
+          - focus-metavariable: $MSG
+
+      - patterns:
+          - pattern: $LOGGER.error($MSG, ...)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: $LOGGER.warning($MSG, ...)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: $LOGGER.info($MSG, ...)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: $LOGGER.debug($MSG, ...)
+          - focus-metavariable: $MSG
+      - patterns:
+          - pattern: $LOGGER.log($LEVEL, $MSG, ...)
+          - focus-metavariable: $MSG
+
+  - id: c-use-after-free
+    languages: [c, cpp]
     severity: ERROR
-    message: "Privileged container detected."
+    message: "Pointer is dereferenced after deallocation. This is undefined behavior and may be exploitable."
     metadata:
-      category: iac
-      checklist: "10. Infrastructure-as-Code & CI/CD"
-    paths:
-      include:
-        - "*.yaml"
-        - "*.yml"
-    pattern-regex: 'privileged:\s*true'
+      category: memory
+      checklist: "11. Memory Safety"
+      cwe:
+        - "CWE-416: Use After Free"
+    patterns:
+      - pattern-either:
+          - pattern: $P->$FIELD
+          - pattern: "*$P"
+          - pattern: $P[$IDX]
 
-  - id: iac-terraform-open-cidr
-    languages: [generic]
+      - pattern-either:
+          - pattern-inside: |
+              free($P);
+              ...
+          - pattern-inside: |
+              delete $P;
+              ...
+          - pattern-inside: |
+              delete[] $P;
+              ...
+
+      - pattern-not-inside: |
+          free($P);
+          ...
+          $P = $VAL;
+          ...
+      - pattern-not-inside: |
+          delete $P;
+          ...
+          $P = $VAL;
+          ...
+      - pattern-not-inside: |
+          delete[] $P;
+          ...
+          $P = $VAL;
+          ...
+
+  - id: c-double-free
+    languages: [c, cpp]
     severity: ERROR
-    message: "Security group or ingress allows 0.0.0.0/0."
+    message: "Pointer may be deallocated more than once without being reset."
     metadata:
-      category: iac
-      checklist: "10. Infrastructure-as-Code & CI/CD"
-    paths:
-      include:
-        - "*.tf"
-    pattern-regex: 'cidr_blocks\s*=\s*\[\s*"0\.0\.0\.0/0"\s*\]'
+      category: memory
+      checklist: "11. Memory Safety"
+      cwe:
+        - "CWE-415: Double Free"
+    patterns:
+      - pattern-either:
+          - pattern: free($P)
+          - pattern: delete $P
+          - pattern: delete[] $P
 
-  - id: iac-terraform-public-s3-acl
-    languages: [generic]
-    severity: ERROR
-    message: "S3 bucket ACL appears public."
-    metadata:
-      category: iac
-      checklist: "10. Infrastructure-as-Code & CI/CD"
-    paths:
-      include:
-        - "*.tf"
-    pattern-regex: 'acl\s*=\s*"public-read"'
+      - pattern-either:
+          - pattern-inside: |
+              free($P);
+              ...
+              free($P);
+          - pattern-inside: |
+              delete $P;
+              ...
+              delete $P;
+          - pattern-inside: |
+              delete[] $P;
+              ...
+              delete[] $P;
 
-  - id: iac-github-actions-event-injection
-    languages: [generic]
+      - pattern-not-inside: |
+          free($P);
+          ...
+          $P = $VAL;
+          ...
+          free($P);
+      - pattern-not-inside: |
+          delete $P;
+          ...
+          $P = $VAL;
+          ...
+          delete $P;
+      - pattern-not-inside: |
+          delete[] $P;
+          ...
+          $P = $VAL;
+          ...
+          delete[] $P;
+
+  - id: cpp-off-by-one-boundary
+    languages: [c, cpp]
     severity: WARNING
-    message: "GitHub Actions expression uses github.event data; possible script injection."
+    message: "Boundary check or loop uses <= against a size/count. Array indexing may be off by one."
     metadata:
-      category: cicd
-      checklist: "10. Infrastructure-as-Code & CI/CD"
-    paths:
-      include:
-        - ".github/workflows/*.yml"
-        - ".github/workflows/*.yaml"
-    pattern-regex: '\$\{\{\s*github\.event\.'
+      category: memory
+      checklist: "11. Memory Safety"
+      cwe:
+        - "CWE-193: Off-by-one Error"
+        - "CWE-125: Out-of-bounds Read"
+        - "CWE-787: Out-of-bounds Write"
+    patterns:
+      - pattern-either:
+          - pattern: |
+              for ($I = $START; $I <= $SIZE; ...) {
+                ...
+                $ARR[$I]
+                ...
+              }
+          - pattern: |
+              for ($I = $START; $I <= $SIZE; ...) {
+                ...
+                $ARR[$I] = $VAL
+                ...
+              }
+          - pattern: |
+              while ($I <= $SIZE) {
+                ...
+                $ARR[$I]
+                ...
+              }
+          - pattern: |
+              while ($I <= $SIZE) {
+                ...
+                $ARR[$I] = $VAL
+                ...
+              }
+          - pattern: |
+              if ($IDX <= $SIZE) {
+                ...
+                $ARR[$IDX]
+                ...
+              }
+          - pattern: |
+              if ($IDX <= sizeof($BUF) / sizeof($BUF[0])) {
+                ...
+                $ARR[$IDX]
+                ...
+              }
+          - pattern: |
+              if ($IDX <= sizeof($BUF)) {
+                ...
+                $ARR[$IDX]
+                ...
+              }
+          - pattern: |
+              if ($IDX <= $BUF.size()) {
+                ...
+                $ARR[$IDX]
+                ...
+              }
+
+      - pattern-not-inside: |
+          for ($I = $START; $I <= $SIZE - 1; ...) {
+            ...
+          }
+      - pattern-not-inside: |
+          while ($I <= $SIZE - 1) {
+            ...
+          }
+      - pattern-not-inside: |
+          if ($IDX <= $SIZE - 1) {
+            ...
+          }
+      - pattern-not-inside: |
+          if ($SIZE > 0 && $IDX <= $SIZE - 1) {
+            ...
+          }
