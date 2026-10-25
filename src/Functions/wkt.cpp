@@ -1,0 +1,120 @@
+#include <DataTypes/DataTypeString.h>
+#include <Functions/FunctionFactory.h>
+#include <Functions/geometryConverters.h>
+#include <Columns/ColumnString.h>
+#include <IO/DoubleConverter.h>
+#include <IO/WriteHelpers.h>
+
+#include <algorithm>
+#include <locale>
+#include <string>
+#include <memory>
+
+namespace DB
+{
+
+namespace
+{
+
+/// `boost::geometry::wkt` writes coordinates with `operator<<`, which uses 6 significant digits by default.
+/// This facet writes them with the shortest representation that round-trips, as the text output of `Float64` does.
+class ShortestFloatNumPut : public std::num_put<char>
+{
+protected:
+    iter_type do_put(iter_type out, std::ios_base & /*str*/, char_type /*fill*/, double value) const override
+    {
+        DoubleConverter<false>::BufferType buffer;
+        size_t length = writeFloatTextFastPath(value, buffer, false);
+        return std::copy(buffer, buffer + length, out);
+    }
+};
+
+class FunctionWKT final : public IFunction
+{
+public:
+    static inline const char * name = "wkt";
+
+    explicit FunctionWKT() = default;
+
+    static FunctionPtr create(ContextPtr)
+    {
+        return std::make_shared<FunctionWKT>();
+    }
+
+    String getName() const override
+    {
+        return name;
+    }
+
+    size_t getNumberOfArguments() const override
+    {
+        return 1;
+    }
+
+    String getSignatureString() const override
+    {
+        return "(Any) -> String";
+    }
+
+    DataTypePtr getReturnTypeForDefaultImplementationForDynamic() const override
+    {
+        return std::make_shared<DataTypeString>();
+    }
+
+    bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo & /*arguments*/) const override { return true; }
+
+    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & /*result_type*/, size_t input_rows_count) const override
+    {
+        auto res_column = ColumnString::create();
+        const std::locale locale(std::locale::classic(), new ShortestFloatNumPut);
+
+        callOnGeometryDataType<CartesianPoint>(arguments[0].type, [&] (const auto & type)
+        {
+            using TypeConverter = std::decay_t<decltype(type)>;
+            using Converter = typename TypeConverter::Type;
+
+            auto figures = Converter::convert(arguments[0].column->convertToFullColumnIfConst());
+
+            for (size_t i = 0; i < input_rows_count; ++i)
+            {
+                std::stringstream str; // STYLE_CHECK_ALLOW_STD_STRING_STREAM
+                str.exceptions(std::ios::failbit);
+                str.imbue(locale);
+                str << boost::geometry::wkt(figures[i]);
+                std::string serialized = str.str();
+                res_column->insertData(serialized.data(), serialized.size());
+            }
+        }
+        );
+
+        return res_column;
+    }
+
+    bool useDefaultImplementationForConstants() const override
+    {
+        return true;
+    }
+};
+
+}
+
+REGISTER_FUNCTION(WKT)
+{
+    FunctionDocumentation::Description description = R"(
+Converts a ClickHouse geometry object to its [Well-Known Text (WKT)](https://en.wikipedia.org/wiki/Well-known_text_representation_of_geometry) representation.
+    )";
+    FunctionDocumentation::Syntax syntax = "wkt(geometry)";
+    FunctionDocumentation::Arguments arguments = {
+        {"geometry", "Geometry object (Point, MultiPoint, Ring, LineString, MultiLineString, Polygon, MultiPolygon).", {"Point", "MultiPoint", "Ring", "LineString", "MultiLineString", "Polygon", "MultiPolygon"}}
+    };
+    FunctionDocumentation::ReturnedValue returned_value = {"Returns the WKT string representation of the geometry.", {"String"}};
+    FunctionDocumentation::Examples examples = {{"Basic point", "SELECT wkt((0.0, 1.0))", "POINT(0 1)"}};
+    FunctionDocumentation::IntroducedIn introduced_in = {21, 4};
+    FunctionDocumentation::Category category = FunctionDocumentation::Category::Geo;
+    FunctionDocumentation documentation = {description, syntax, arguments, {}, returned_value, examples, introduced_in, category};
+
+    factory.registerFunction<FunctionWKT>(documentation);
+    factory.registerAlias("WKT", "wkt");
+}
+
+}
